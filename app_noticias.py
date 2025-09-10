@@ -23,7 +23,7 @@ from io import BytesIO
 # -----------------------------
 # Configurações
 # -----------------------------
-SENHA_APP = "DM&GT"  # Defina sua senha aqui
+SENHA_APP = "MAP2025"  # Defina sua senha aqui
 
 TERMS_PADRAO = [
     "Contrave", "Bupropiona", "Naltrexona",
