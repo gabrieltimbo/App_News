@@ -7,19 +7,20 @@ Original file is located at
     https://colab.research.google.com/drive/1pRzf98ffqo-D8KmamRMYR4XCiOVxjBCr
 """
 
-# -----------------------------
-# Importações
-# -----------------------------
+# -*- coding: utf-8 -*-
+"""Buscador de Notícias sobre Contrave / Merck - Streamlit"""
+
 import streamlit as st
 import feedparser
 import pandas as pd
 from datetime import datetime, timedelta
 from dateutil import parser
 from io import BytesIO
+import re
 
-# -----------------------------
+# ==============================
 # Configurações padrão
-# -----------------------------
+# ==============================
 TERMS_PADRAO = [
     "Contrave", "Bupropiona", "Naltrexona",
     "Bupropiona + naltrexona", "Contrave XR",
@@ -48,88 +49,150 @@ RSS_FEEDS = [
     "https://www.roche.com/media/newsfeed.xml"
 ]
 
-# -----------------------------
-# Streamlit App
-# -----------------------------
-st.title("🔍 Buscador de Notícias sobre Contrave / Merck ")
+SENHA_CORRETA = "minhasenha123"  # Defina sua senha
+
+# ==============================
+# Login
+# ==============================
+senha = st.text_input("🔑 Digite a senha para acessar o app", type="password")
+if senha != SENHA_CORRETA:
+    st.warning("Senha incorreta! Acesso negado.")
+    st.stop()
+
+# ==============================
+# Título
+# ==============================
+st.title("🔍 Buscador de Notícias sobre Contrave / Merck")
 st.markdown("Busque notícias recentes em diversos sites sobre medicamentos e empresas farmacêuticas.")
 
-# Mostrar termos padrão
+# ==============================
+# Termos de busca
+# ==============================
 st.subheader("📌 Termos de busca padrão")
 st.write(", ".join(TERMS_PADRAO))
 
-# Input do usuário para novos termos
 novos_termos = st.text_input("Adicionar termos extras separados por vírgula", "")
 TERMS = TERMS_PADRAO + [t.strip() for t in novos_termos.split(",") if t.strip() != ""]
 
-# Input do usuário para quantidade de dias
+# ==============================
+# Seleção de sites
+# ==============================
+st.subheader("🌐 Selecionar sites para buscar")
+sites_selecionados = st.multiselect(
+    "Escolha os sites desejados", 
+    options=RSS_FEEDS, 
+    default=RSS_FEEDS  # TODOS selecionados por padrão
+)
+
+# ==============================
+# Quantidade de dias
+# ==============================
 DIAS_BUSCA = st.number_input("Buscar notícias dos últimos X dias", min_value=1, max_value=365, value=180)
 
-# Mostrar sites que serão consultados
-st.subheader("🌐 Sites que serão consultados")
-for site in RSS_FEEDS:
-    st.write("-", site)
+# ==============================
+# Filtro exato opcional
+# ==============================
+filtro_exato = st.text_input("Filtrar por palavra exata (opcional)")
 
-# Botão para iniciar a busca
+# ==============================
+# Função para resumir texto
+# ==============================
+def resumir_texto(texto, max_palavras=30):
+    palavras = texto.split()
+    resumo = " ".join(palavras[:max_palavras])
+    if len(palavras) > max_palavras:
+        resumo += "..."
+    return resumo
+
+# ==============================
+# Função para destacar palavras-chave
+# ==============================
+def destacar_keywords(texto, termos):
+    for term in termos:
+        pattern = re.compile(re.escape(term), re.IGNORECASE)
+        texto = pattern.sub(f"**{term}**", texto)
+    return texto
+
+# ==============================
+# Função para buscar RSS
+# ==============================
+def buscar_rss(feed_url, termos, dias=180, palavra_exata=None):
+    parsed = feedparser.parse(feed_url)
+    results = []
+    limite_data = datetime.now() - timedelta(days=dias)
+
+    for entry in parsed.entries:
+        pub_date = None
+        if "published" in entry:
+            try:
+                pub_date = parser.parse(entry.published)
+                if pub_date.tzinfo is not None:
+                    pub_date = pub_date.replace(tzinfo=None)
+            except:
+                pub_date = None
+
+        if pub_date is None or pub_date >= limite_data:
+            title = entry.get("title", "")
+            summary = entry.get("summary", "")
+            content = title + " " + summary
+
+            incluir = False
+            if palavra_exata:
+                incluir = palavra_exata.lower() in content.lower()
+            else:
+                incluir = any(term.lower() in content.lower() for term in termos)
+
+            if incluir:
+                results.append({
+                    "fonte": feed_url,
+                    "title": title,
+                    "link": entry.get("link"),
+                    "date": str(pub_date) if pub_date else None,
+                    "summary": destacar_keywords(resumir_texto(content, 30), termos),
+                    "content": content
+                })
+    return results
+
+# ==============================
+# Botão para iniciar busca
+# ==============================
 if st.button("🚀 Buscar Notícias"):
 
     st.info("Buscando notícias... Isso pode levar alguns segundos dependendo do número de sites.")
 
-    # -----------------------------
-    # Função para buscar RSS e filtrar
-    # -----------------------------
-    def buscar_rss(feed_url, dias=DIAS_BUSCA):
-        parsed = feedparser.parse(feed_url)
-        results = []
-        limite_data = datetime.now() - timedelta(days=dias)
-
-        for entry in parsed.entries:
-            pub_date = None
-            if "published" in entry:
-                try:
-                    pub_date = parser.parse(entry.published)
-                    if pub_date.tzinfo is not None:
-                        pub_date = pub_date.replace(tzinfo=None)
-                except:
-                    pub_date = None
-
-            if pub_date is None or pub_date >= limite_data:
-                title = entry.get("title", "")
-                summary = entry.get("summary", "")
-                content = title + " " + summary
-                if any(term.lower() in content.lower() for term in TERMS):
-                    results.append({
-                        "fonte": feed_url,
-                        "title": title,
-                        "link": entry.get("link"),
-                        "date": str(pub_date) if pub_date else None,
-                        "content": content
-                    })
-        return results
-
-    # -----------------------------
-    # Rodar buscas
-    # -----------------------------
     all_results = []
+    progresso = st.progress(0)
+    total = len(sites_selecionados)
 
-    for feed in RSS_FEEDS:
-        st.write(f"Buscando: {feed}")
+    for i, feed in enumerate(sites_selecionados):
+        st.write(f"🔹 Buscando: {feed}")
         try:
-            feed_results = buscar_rss(feed)
+            feed_results = buscar_rss(feed, TERMS, dias=DIAS_BUSCA, palavra_exata=filtro_exato if filtro_exato else None)
             all_results.extend(feed_results)
         except Exception as e:
             st.error(f"Erro ao processar feed {feed}: {e}")
+        progresso.progress((i + 1) / total)
 
-    # -----------------------------
-    # Transformar em DataFrame
-    # -----------------------------
+    # ==============================
+    # Mostrar resultados
+    # ==============================
     df = pd.DataFrame(all_results).drop_duplicates(subset=["title"])
 
     if df.empty:
         st.warning(f"Nenhuma notícia encontrada nos últimos {DIAS_BUSCA} dias para os termos pesquisados.")
     else:
         st.success(f"{len(df)} notícias encontradas:")
-        st.dataframe(df)
+
+        cores_sites = ["#E63946","#F1FAEE","#A8DADC","#457B9D","#1D3557","#FFBE0B","#FB5607","#8338EC","#3A86FF","#06D6A0"]
+        site_cor_map = {site: cores_sites[i % len(cores_sites)] for i, site in enumerate(df['fonte'].unique())}
+
+        with st.expander("📑 Mostrar tabela completa"):
+            for idx, row in df.iterrows():
+                st.markdown(f"<span style='color:{site_cor_map[row['fonte']]}; font-weight:bold'>{row['fonte']}</span>", unsafe_allow_html=True)
+                st.markdown(f"**{row['title']}** ({row['date']})")
+                st.markdown(f"{row['summary']}")
+                st.markdown(f"[Link]({row['link']})")
+                st.markdown("---")
 
         # Exportar para Excel
         output = BytesIO()
