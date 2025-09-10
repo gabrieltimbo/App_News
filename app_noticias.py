@@ -8,7 +8,7 @@ Original file is located at
 """
 
 # -*- coding: utf-8 -*-
-"""Buscador de Notícias sobre Contrave / Merck com senha"""
+"""Buscador de Notícias sobre Contrave / Merck """
 
 # -----------------------------
 # Importações
@@ -19,6 +19,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from dateutil import parser
 from io import BytesIO
+import requests
+from bs4 import BeautifulSoup
 
 # -----------------------------
 # Configurações
@@ -53,6 +55,10 @@ RSS_FEEDS = [
     "https://www.roche.com/media/newsfeed.xml"
 ]
 
+SCRAPING_URLS = [
+    "https://www.gov.br/anvisa/pt-br/assuntos/medicamentos/cmed/precos"
+]
+
 # -----------------------------
 # Streamlit App
 # -----------------------------
@@ -82,7 +88,7 @@ DIAS_BUSCA = st.number_input("Buscar notícias dos últimos X dias", min_value=1
 # Sites consultados
 # -----------------------------
 st.subheader("🌐 Sites que serão consultados")
-for site in RSS_FEEDS:
+for site in RSS_FEEDS + SCRAPING_URLS:
     st.write("-", site)
 
 # -----------------------------
@@ -107,7 +113,6 @@ def buscar_rss(feed_url, dias=DIAS_BUSCA):
             title = entry.get("title", "")
             summary = entry.get("summary", "")
             content = title + " " + summary
-            # Apenas busca pelos termos combinados
             if any(term.lower() in content.lower() for term in TERMS):
                 results.append({
                     "fonte": feed_url,
@@ -119,19 +124,54 @@ def buscar_rss(feed_url, dias=DIAS_BUSCA):
     return results
 
 # -----------------------------
+# Função de scraping CMED
+# -----------------------------
+def buscar_cmed_precos(url):
+    results = []
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        table_rows = soup.select("table tbody tr")
+        for row in table_rows:
+            cols = row.find_all("td")
+            if len(cols) >= 3:
+                medicamento = cols[0].get_text(strip=True)
+                laboratorio = cols[1].get_text(strip=True)
+                preco = cols[2].get_text(strip=True)
+                content = f"{medicamento} {laboratorio} {preco}"
+                if any(term.lower() in content.lower() for term in TERMS):
+                    results.append({
+                        "fonte": url,
+                        "title": medicamento,
+                        "link": url,
+                        "date": str(datetime.now().date()),
+                        "content": content
+                    })
+    except Exception as e:
+        st.error(f"Erro ao acessar {url}: {e}")
+    return results
+
+# -----------------------------
 # Botão de busca
 # -----------------------------
 if st.button("🚀 Buscar Notícias"):
     st.info("Buscando notícias... Isso pode levar alguns segundos dependendo do número de sites.")
     all_results = []
 
+    # RSS
     for feed in RSS_FEEDS:
-        st.write(f"Buscando: {feed}")
+        st.write(f"Buscando RSS: {feed}")
         try:
             feed_results = buscar_rss(feed)
             all_results.extend(feed_results)
         except Exception as e:
             st.error(f"Erro ao processar feed {feed}: {e}")
+
+    # Scraping
+    for url in SCRAPING_URLS:
+        st.write(f"Buscando scraping: {url}")
+        all_results.extend(buscar_cmed_precos(url))
 
     # -----------------------------
     # Mostrar resultados
