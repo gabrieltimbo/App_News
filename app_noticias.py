@@ -30,7 +30,10 @@ TERMS_PADRAO = [
     "Medicamento para obesidade",
     "Tratamento de obesidade",
     "Merck",
-    "Eurofarma"
+    "Eurofarma",
+    "EMS",
+    "Poviztra",
+    "Extensior"
 ]
 
 RSS_FEEDS = [
